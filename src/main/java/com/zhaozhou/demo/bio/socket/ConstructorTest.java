@@ -15,6 +15,7 @@ public class ConstructorTest {
      * @throws IOException
      */
     public static Socket openSocket1() throws IOException{
+        System.out.println("test1");
         Socket socket = new Socket();
         SocketAddress socketAddress = new InetSocketAddress("127.0.0.1",9999);
         socket.connect(socketAddress, 10000);
@@ -31,6 +32,7 @@ public class ConstructorTest {
      */
     public static Socket openSocket2(String host, int port) throws IOException{
         //Socket socket = new Socket(host, port);
+        System.out.println("test2");
         Socket socket = new Socket(InetAddress.getByName(host), port);
         return socket;
     }
@@ -45,6 +47,7 @@ public class ConstructorTest {
      * @throws IOException
      */
     public static Socket openSocket3(String host, int port, int localPort) throws IOException{
+        System.out.println("test3");
         Socket socket = new Socket(host, port, InetAddress.getByName("127.0.0.1"), 12345);
         return socket;
     }
