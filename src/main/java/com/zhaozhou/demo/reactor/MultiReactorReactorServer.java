@@ -8,12 +8,15 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Created by zhaozhou on 2018/10/12.
  * 多reactor的reactor模式
  */
 public class MultiReactorReactorServer {
+
     public static void start(int port){
         try {
             Selector selector = Selector.open();
@@ -23,7 +26,7 @@ public class MultiReactorReactorServer {
             serverSocketChannel.bind(new InetSocketAddress(port), 128);
 
             //注册accept事件
-            serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+            serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT,new BasicReactorServer.Acceptor(selector, serverSocketChannel));
 
             //阻塞等待就绪事件
             while (selector.select() > 0){
@@ -34,42 +37,8 @@ public class MultiReactorReactorServer {
                 while (iterator.hasNext()){
                     SelectionKey key = iterator.next();
                     iterator.remove();
-                    try {
-                        //有客户端连接？
-                        if(key.isAcceptable()){
-                            ServerSocketChannel acceptChannel = (ServerSocketChannel)key.channel();
-                            SocketChannel socketChannel = acceptChannel.accept();
-                            socketChannel.configureBlocking(false);
-                            System.out.println("accept connect form " + socketChannel.getRemoteAddress().toString());
-                            socketChannel.register(selector, SelectionKey.OP_READ);
-                        }
-                        //有读事件就绪？
-                        else if(key.isReadable()){
-                            SocketChannel socketChannel = (SocketChannel)key.channel();
-                            ByteBuffer buffer = ByteBuffer.allocate(1024);
-                            int cnt = 0, total = 0;
-                            String msg = "";
-                            do{
-                                cnt = socketChannel.read(buffer);
-                                if(cnt > 0){
-                                    total += cnt;
-                                    msg += new String(buffer.array());
-                                }
-                                buffer.clear();
-                            }while (cnt >= buffer.capacity());
-                            System.out.println("read data num:" + total);
-                            System.out.println("recv msg:" + msg);;
-
-                            //回写数据
-                            ByteBuffer sendBuf = ByteBuffer.allocate(msg.getBytes().length + 1);
-                            sendBuf.put(msg.getBytes());
-                            socketChannel.write(sendBuf);
-                        }
-                    }catch (Exception e){
-                        e.printStackTrace();
-                        key.channel().close();
-                    }
-
+                    Runnable handler = (Runnable) key.attachment();
+                    handler.run();
                     keys.remove(key);
                 }
             }
@@ -80,6 +49,97 @@ public class MultiReactorReactorServer {
     }
 
 
+    /**
+     * 接受连接处理
+     */
+    public static class Acceptor implements Runnable{
+
+        private Selector selector;
+
+        private ServerSocketChannel serverSocketChannel;
+
+        public Acceptor(Selector selector, ServerSocketChannel serverSocketChannel) {
+            this.selector = selector;
+            this.serverSocketChannel = serverSocketChannel;
+        }
+
+        public void run() {
+            try {
+                SocketChannel socketChannel = serverSocketChannel.accept();
+                socketChannel.configureBlocking(false);
+                socketChannel.register(selector, SelectionKey.OP_READ,new BasicReactorServer.DispatchHandler(socketChannel));
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+        }
+    }
+
+
+    /**
+     * 读取数据处理
+     */
+    public static class DispatchHandler implements Runnable{
+
+        private static Executor executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() << 1);
+        private SocketChannel socketChannel;
+
+        public DispatchHandler(SocketChannel socketChannel) {
+            this.socketChannel = socketChannel;
+        }
+
+        public void run() {
+            executor.execute(new ReaderHandler(socketChannel));
+        }
+    }
+
+
+    public static class ReaderHandler implements Runnable{
+        private SocketChannel socketChannel;
+
+        public ReaderHandler(SocketChannel socketChannel) {
+            this.socketChannel = socketChannel;
+        }
+
+        public void run() {
+            try {
+                ByteBuffer buffer = ByteBuffer.allocate(1024);
+                int cnt = 0, total = 0;
+                String msg = "";
+                do {
+                    cnt = socketChannel.read(buffer);
+                    if (cnt > 0) {
+                        total += cnt;
+                        msg += new String(buffer.array());
+                    }
+                    buffer.clear();
+                } while (cnt >= buffer.capacity());
+                System.out.println("read data num:" + total);
+                System.out.println("recv msg:" + msg);
+
+                //回写数据
+                ByteBuffer sendBuf = ByteBuffer.allocate(msg.getBytes().length + 1);
+                sendBuf.put(msg.getBytes());
+                socketChannel.write(sendBuf);
+
+            }catch (Exception e){
+                e.printStackTrace();
+                if(socketChannel != null){
+                    try {
+                        socketChannel.close();
+                    }catch (Exception ex){
+                        ex.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
+
+
+
+
+    public static void main(String[] args){
+        BasicReactorServer.start(9999);
+    }
 
 
 }
